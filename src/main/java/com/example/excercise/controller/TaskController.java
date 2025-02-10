@@ -1,7 +1,8 @@
 package com.example.excercise.controller;
 
+import com.example.excercise.dto.TaskControllerDTO;
+import com.example.excercise.entity.Project;
 import com.example.excercise.entity.Task;
-import com.example.excercise.service.RestAPITaskService;
 import com.example.excercise.service.TaskService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -14,28 +15,27 @@ import java.util.List;
 
 @CrossOrigin("*")
 @Controller
-@RequestMapping("/api/task")
+@RequestMapping("/api/v1")
 public class TaskController {
 
     private final TaskService taskService;
-    private final RestAPITaskService restApiTaskService;
 
-    public TaskController(TaskService taskService, RestAPITaskService restApiTaskService) {
+    public TaskController(TaskService taskService) {
         this.taskService = taskService;
-        this.restApiTaskService = restApiTaskService;
     }
 
-
-    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
+    @GetMapping(path = "/tasks", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<List<Task>> getTasks() {
-
-
-        return new ResponseEntity<>(taskService.getTasks(), HttpStatus.OK);
+        return new ResponseEntity<>(taskService.getAllTasks(), HttpStatus.OK);
     }
 
-    @PostMapping(path = "/copy", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> copy(@RequestBody Task task) {
+    @PostMapping(path = "/projects/{projectId}/tasks", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> createTask(@RequestBody TaskControllerDTO taskControllerDTO, String projectId) {
+        return new ResponseEntity<>(taskService.createTask(taskControllerDTO, projectId), HttpStatus.OK);
+    }
 
-        return new ResponseEntity<>(restApiTaskService.copyTask(task), HttpStatus.OK);
+    @GetMapping(path = "/projects", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<List<Project>> getProjects() {
+        return new ResponseEntity<>(taskService.getProjects(), HttpStatus.OK);
     }
 }

@@ -1,13 +1,17 @@
 package com.example.excercise.service;
 
+import com.example.excercise.dto.JiraRestAPIProjectResponse;
+import com.example.excercise.dto.JiraRestAPITaskResponse;
 import com.example.excercise.entity.Task;
-import com.example.excercise.repo.TaskRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -16,55 +20,58 @@ import java.util.List;
 import java.util.Objects;
 
 @Service
-public class RestAPITaskServiceImpl implements RestAPITaskService {
+public class JiraRestApiService {
 
     private static final String JIRA_REST_API_URL = "https://jakubzdunczuk.atlassian.net/rest/api/3/";
     private static final String JIRA_USER_MAIL = "jakub.zdunczuk@gmail.com";
     private static final String JIRA_TOKEN = "ATATT3xFfGF0PFTR2EPwbi7KbFBWWdWt8emRvQI42f3A2fX1GKLOGqtUF7i2OfP-AhPWIX37MC95T2YDgfgsM1aq8BvgfXuiYKCmNf6E_MbSV4CJnWYe7GB7F55j4aHiIkk0VWEuyVVhC-VExF-F9yI_k41PgQqDWX9s6Dw3iWt2jZgRMhv1MYY=F374AE82";
+    public static final String PROJECT_1_NAME = "PROJ1";
+    public static final String PROJECT_2_NAME = "PROJ2";
     private final RestTemplate restTemplate;
-    private final TaskRepository taskRepository;
+    private final JiraRestAPIMapper jiraRestAPIMapper;
+
 
 
     @Autowired
-    public RestAPITaskServiceImpl(RestTemplate restTemplate, TaskRepository taskRepository) {
+    public JiraRestApiService(RestTemplate restTemplate, JiraRestAPIMapper jiraRestAPIMapper) {
         this.restTemplate = restTemplate;
-        this.taskRepository = taskRepository;
+        this.jiraRestAPIMapper = jiraRestAPIMapper;
     }
 
-    @Override
-    public List<Task> getTasks() {
+    public List<JiraRestAPITaskResponse> getAllTasks() {
 
-        HttpEntity<JsonNode> entity1 = prepareHttpEntityToGetTasksByProjectName("PROJ1");
-        HttpEntity<JsonNode> entity2 = prepareHttpEntityToGetTasksByProjectName("PROJ2");
+        HttpEntity<JsonNode> entity1 = prepareHttpEntityToGetTasksByProjectName(PROJECT_1_NAME);
+        HttpEntity<JsonNode> entity2 = prepareHttpEntityToGetTasksByProjectName(PROJECT_2_NAME);
 
-        ResponseEntity<JsonNode> responseEntity1 = sendSearchRequestToJiraRestApi(entity1);
-        ResponseEntity<JsonNode> responseEntity2 = sendSearchRequestToJiraRestApi(entity2);
+        ResponseEntity<JsonNode> responseEntity1 = sendSearchTasksRequestToJiraRestApi(entity1);
+        ResponseEntity<JsonNode> responseEntity2 = sendSearchTasksRequestToJiraRestApi(entity2);
 
-        List<Task> taskList = new ArrayList<>();
-        List<Task> taskList1 = getTasksFromRestApi(responseEntity1);
-        List<Task> taskList2 = getTasksFromRestApi(responseEntity2);
-        taskList.addAll(taskList1);
-        taskList.addAll(taskList2);
+        List<JiraRestAPITaskResponse> jiraRestApiTaskDTOList = new ArrayList<>();
+        List<JiraRestAPITaskResponse> jiraRestApiTaskDTOList1 = jiraRestAPIMapper.mapTasksFromJSON(responseEntity1);
+        List<JiraRestAPITaskResponse> jiraRestApiTaskDTOList2 = jiraRestAPIMapper.mapTasksFromJSON(responseEntity2);
+        jiraRestApiTaskDTOList.addAll(jiraRestApiTaskDTOList1);
+        jiraRestApiTaskDTOList.addAll(jiraRestApiTaskDTOList2);
 
-        return taskList;
+        return jiraRestApiTaskDTOList;
     }
 
-    @Override
-    public String copyTask(Task task) {
-        ObjectNode payload = getJsonNodeToCopyTask(task);
+    public ResponseEntity<JsonNode> createTask(Task task) {
+        ObjectNode payload = preparePayloadToCreateTask(task);
 
         HttpEntity<JsonNode> entity = prepareHttpEntityWithHeadersAndAuth(payload);
 
-        ResponseEntity<JsonNode> responseEntity = sendSaveRequestToJiraRestApi(entity);
-
-        if (responseEntity.getStatusCode().equals(HttpStatus.CREATED)) {
-            taskRepository.save(new Task(Objects.requireNonNull(responseEntity.getBody()).get("id").asLong(), task.getTitle(), task.getDescription(), task.getProjectId()));
-        }
-        System.out.println(responseEntity.getBody().toString());
-        return responseEntity.getBody().toString();
+        return sendCreateRequestToJiraRestApi(entity);
     }
 
-    private ResponseEntity<JsonNode> sendSaveRequestToJiraRestApi(HttpEntity<JsonNode> entity) {
+    public List<JiraRestAPIProjectResponse> getProjects() {
+        HttpEntity<JsonNode> entity = prepareHttpEntityWithHeadersAndAuth(null);
+
+        ResponseEntity<JsonNode> responseEntity = sendGetProjectsRequestToJiraRestApi(entity);
+
+        return jiraRestAPIMapper.mapProjectsFromResponse(responseEntity);
+    }
+
+    private ResponseEntity<JsonNode> sendCreateRequestToJiraRestApi(HttpEntity<JsonNode> entity) {
         return restTemplate.exchange(
                 JIRA_REST_API_URL + "issue",
                 HttpMethod.POST,
@@ -72,25 +79,22 @@ public class RestAPITaskServiceImpl implements RestAPITaskService {
                 JsonNode.class);
     }
 
-    private ResponseEntity<JsonNode> sendSearchRequestToJiraRestApi(HttpEntity<JsonNode> entity1) {
+    private ResponseEntity<JsonNode> sendSearchTasksRequestToJiraRestApi(HttpEntity<JsonNode> entity) {
         return restTemplate.exchange(
                 JIRA_REST_API_URL + "search/jql",
                 HttpMethod.POST,
-                entity1,
+                entity,
                 JsonNode.class);
     }
 
-    private List<Task> getTasksFromRestApi(ResponseEntity<JsonNode> responseEntity) {
-        List<Task> taskList = new ArrayList<>();
-        Objects.requireNonNull(responseEntity.getBody()).get("issues").forEach(issue ->
-            taskList.add(new Task(
-                    issue.get("id").asLong(),
-                    issue.get("fields").get("summary").asText(),
-                    issue.get("fields").get("description").isNull() ? "" : issue.get("fields").get("description").get("content").get(0).get("content").get(0).get("text").asText(),
-                    issue.get("fields").get("project").get("id").asLong()))
-        );
-        return taskList;
+    private ResponseEntity<JsonNode> sendGetProjectsRequestToJiraRestApi(HttpEntity<JsonNode> entity) {
+        return restTemplate.exchange(
+                JIRA_REST_API_URL + "project/search",
+                HttpMethod.GET,
+                entity,
+                JsonNode.class);
     }
+
 
     private HttpEntity<JsonNode> prepareHttpEntityToGetTasksByProjectName(String projectName) {
         JsonNodeFactory jnf = JsonNodeFactory.instance;
@@ -109,16 +113,19 @@ public class RestAPITaskServiceImpl implements RestAPITaskService {
     }
 
 
-
     private HttpEntity<JsonNode> prepareHttpEntityWithHeadersAndAuth(ObjectNode payload) {
         HttpHeaders headers = new HttpHeaders();
         headers.add("Accept", "application/json");
         headers.add("Content-Type", "application/json");
         headers.setBasicAuth(JIRA_USER_MAIL, JIRA_TOKEN);
-        return new HttpEntity<>(payload, headers);
+
+        if (!Objects.isNull(payload)) {
+            return new HttpEntity<>(payload, headers);
+        }
+        return new HttpEntity<>(headers);
     }
 
-    private ObjectNode getJsonNodeToCopyTask(Task task) {
+    private ObjectNode preparePayloadToCreateTask(Task task) {
         JsonNodeFactory jnf = JsonNodeFactory.instance;
         ObjectNode payload = jnf.objectNode();
         {
@@ -133,7 +140,7 @@ public class RestAPITaskServiceImpl implements RestAPITaskService {
                         ArrayNode content1 = content0.putArray("content");
                         ObjectNode content2 = content1.addObject();
                         {
-                            content2.put("text", Objects.nonNull(task.getDescription()) ? task.getDescription() : "");
+                            content2.put("text", task.getDescription());
                             content2.put("type", "text");
                         }
                     }
@@ -142,11 +149,11 @@ public class RestAPITaskServiceImpl implements RestAPITaskService {
                 }
                 ObjectNode issuetype = fields.putObject("issuetype");
                 {
-                    issuetype.put("id", task.getProjectId().equals(10000L) ? "10006" : "10001");
+                    issuetype.put("id", task.getProject().getId());
                 }
                 ObjectNode project = fields.putObject("project");
                 {
-                    project.put("id", task.getProjectId().equals(10000L) ? "10001" : "10000");
+                    project.put("id", task.getProject().getId());
                 }
                 fields.put("summary", task.getTitle());
             }
